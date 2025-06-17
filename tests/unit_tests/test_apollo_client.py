@@ -85,13 +85,14 @@ def test_get_service_conf_with_invalid_app_id():
 
 def test_get_service_conf_with_invalid_server():
     """测试使用无效的服务器地址获取服务配置"""
-    client = ApolloClient(
-        meta_url="http://invalid-server",
-        app_id=APOLLO_APP_ID,
-        app_secret=APOLLO_SECRET,
-        cluster=APOLLO_CLUSTER,
-        namespace=APOLLO_NAMESPACE,
-    )
+    with pytest.raises(Exception):
+        client = ApolloClient(
+            meta_url="http://invalid-server",
+            app_id=APOLLO_APP_ID,
+            app_secret=APOLLO_SECRET,
+            cluster=APOLLO_CLUSTER,
+            namespace=APOLLO_NAMESPACE,
+        )
 
 def test_update_config_server():
     """测试更新配置服务器"""
@@ -328,6 +329,22 @@ def test_local_cache():
     assert cached_config == config
     
     logger.info(f"本地缓存测试成功: {cached_config}")
+
+
+def test_get_value():
+    client = ApolloClient(
+        meta_url=APOLLO_TEST_SERVER,
+        app_id=APOLLO_APP_ID,
+        app_secret=APOLLO_SECRET,
+        cluster=APOLLO_CLUSTER,
+        namespace=APOLLO_NAMESPACE,
+    )
+    index = 0
+    while True:
+        index += 1
+        database = client.get_value("database")
+        logger.info(f"index {index}, database: {database}")
+        time.sleep(3)
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

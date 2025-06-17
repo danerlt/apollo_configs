@@ -12,7 +12,7 @@ import json
 import os
 import threading
 import time
-from typing import Callable, Dict, Sequence, Any
+from typing import Callable, Dict, Any
 
 import yaml
 from pydantic import BaseModel
@@ -65,6 +65,7 @@ class ApolloClient:
             app_secret: str | None = None,
             cache_file_dir_path: str | None = None,
     ):
+        logger.info(f"Init ApolloClient, {meta_url=}, {app_id=}, {cluster=}, {namespace=}")
         self.meta_url = meta_url
         self.app_id = app_id
         self.app_secret = app_secret
@@ -86,13 +87,13 @@ class ApolloClient:
 
         # 初始化缓存目录
         self._init_cache_file_dir_path(cache_file_dir_path)
-        
+
         # 更新配置服务器
         self.update_config_server()
-        
+
         # 初始化正式的 HttpClient
         self.http_client = HttpClient(self._config_server_url, app_id=app_id, app_secret=app_secret)
-        
+
         # 获取配置
         self.fetch_configuration()
 
@@ -148,7 +149,7 @@ class ApolloClient:
         response = temp_http_client.get(service_conf_path)
         if response.status_code != 200:
             raise ValueError(f"获取 Apollo 服务配置失败，状态码: {response.status_code}")
-        
+
         try:
             service_conf = response.json()
             if not service_conf:
@@ -175,30 +176,22 @@ class ApolloClient:
 
     def fetch_config_by_namespace(self, namespace: str = "application") -> None:
         """从 Apollo 服务器获取指定命名空间的配置"""
-        url = f"configs/{self.app_id}/{self.cluster}/{namespace}"
         try:
-            response = self.http_client.get(url)
-            if response.status_code == 200:
-                data = response.json()
-                configurations = data.get("configurations", {})
-                release_key = data.get("releaseKey", str(time.time()))
-                self.update_cache(namespace, configurations)
+            apollo_server_response = self.get_config_by_apollo_config_server()
 
-                self.update_local_file_cache(
-                    release_key=release_key,
-                    data=configurations,
-                    namespace=namespace,
-                )
-            else:
-                logger.warning("从 Apollo 获取配置失败，从本地缓存文件加载")
-                data = self.get_local_file_cache(namespace)
-                self.update_cache(namespace, data)
+            release_key = apollo_server_response.release_key
+            configurations = apollo_server_response.config
+            self.update_cache(namespace, configurations)
 
+            self.update_local_file_cache(
+                release_key=release_key,
+                data=configurations,
+                namespace=namespace,
+            )
         except Exception as e:
+            logger.error(f"获取 Apollo 配置失败，从本地加载")
             data = self.get_local_file_cache(namespace)
             self.update_cache(namespace, data)
-
-            logger.error(f"获取 Apollo 配置失败，错误: {e}, url: {url}, config server url: {self._config_server_url}")
             self.update_config_server(exclude=self._config_server_url)
 
     def fetch_configuration(self) -> None:
@@ -230,19 +223,19 @@ class ApolloClient:
             logger.error(f"加载本地缓存文件失败: {e}")
             return False
 
-    def get_value(self, key: str, default_val: str | None = None, namespace: str = "application") -> str | None:
+    def get_value(self, key: str, default_val: str | None = None) -> str | None:
         """获取配置值"""
         try:
-            if namespace in self._cache:
-                return self._cache[namespace].get(key, default_val)
+            if self.namespace in self._cache:
+                return self._cache[self.namespace].get(key, default_val)
             return default_val
         except Exception as e:
             logger.error(f"获取键({key})值失败，错误: {e}")
             return default_val
 
-    def get_json_value(self, key: str, default_val: dict | None = None, namespace: str = "application") -> dict:
+    def get_json_value(self, key: str, default_val: dict | None = None) -> dict:
         """获取配置值并转换为 JSON 格式"""
-        val = self.get_value(key, namespace=namespace)
+        val = self.get_value(key)
         try:
             return json.loads(val)
         except (json.JSONDecodeError, TypeError):
@@ -250,8 +243,8 @@ class ApolloClient:
 
         return default_val or {}
 
-    def request_config_server(self, release_key: str | None = None,
-                              messages: str | None = None) -> ApolloServerResponse:
+    def get_config_by_apollo_config_server(self, release_key: str | None = None,
+                                           messages: str | None = None) -> ApolloServerResponse:
         path = f"configs/{self.app_id}/{self.cluster}/{self.namespace}"
         params = None
         if release_key and messages:
@@ -270,6 +263,7 @@ class ApolloClient:
         # TODO add xml text 等类型
         else:
             configs = configurations
+        logger.debug(f"namespace: {self.namespace}, configs: {configs}")
         return ApolloServerResponse(release_key=response_data["releaseKey"], config=configs)
 
     def update(self, server_response: ApolloServerResponse, namespace: str) -> None:
